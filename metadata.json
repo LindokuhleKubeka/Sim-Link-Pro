@@ -1,0 +1,6 @@
+{
+  "name": "SIM Link",
+  "description": "Universal SMS Gateway and Serial Modem terminal for receiving messages from pocket routers and USB sim devices.",
+  "requestFramePermissions": [],
+  "majorCapabilities": []
+}
