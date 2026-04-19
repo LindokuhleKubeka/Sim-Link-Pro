@@ -23,4 +23,6 @@ export interface SMART_INFO {
   otpCode?: string;
   senderType: 'bank' | 'personal' | 'service' | 'spam' | 'unknown';
   summary: string;
+  suggestedActions: string[];
+  confidence: number;
 }

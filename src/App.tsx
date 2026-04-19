@@ -25,9 +25,14 @@ import {
   Info as InfoIcon,
   Archive,
   Send,
-  MoreHorizontal
+  MoreHorizontal,
+  Activity,
+  Globe,
+  Star,
+  ArrowRight
 } from 'lucide-react';
-import { motion, AnimatePresence } from 'motion/react';
+import { motion, AnimatePresence, LayoutGroup } from 'motion/react';
+import * as d3 from 'd3';
 import { GoogleGenAI } from "@google/genai";
 import { format } from 'date-fns';
 import { cn } from './lib/utils';
@@ -51,9 +56,57 @@ export default function App() {
   const [isLoading, setIsLoading] = useState(false);
   const [smartInfo, setSmartInfo] = useState<Record<string, SMART_INFO>>({});
   const [isAnalyzing, setIsAnalyzing] = useState<string | null>(null);
+  const [signalHistory, setSignalHistory] = useState<number[]>(Array(50).fill(60));
   
   const serialPort = useRef<any>(null);
   const reader = useRef<any>(null);
+  const sparklineRef = useRef<SVGSVGElement>(null);
+
+  // Update signal history over time for visualization
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setSignalHistory(prev => {
+        const last = prev[prev.length - 1];
+        const next = Math.max(20, Math.min(100, last + (Math.random() * 10 - 5)));
+        return [...prev.slice(1), next];
+      });
+    }, 1000);
+    return () => clearInterval(interval);
+  }, []);
+
+  // Draw D3 Sparkline
+  useEffect(() => {
+    if (!sparklineRef.current) return;
+    const svg = d3.select(sparklineRef.current);
+    svg.selectAll("*").remove();
+
+    const width = 200;
+    const height = 40;
+    const x = d3.scaleLinear().domain([0, signalHistory.length - 1]).range([0, width]);
+    const y = d3.scaleLinear().domain([0, 100]).range([height, 0]);
+
+    const line = d3.line<number>()
+      .x((_, i) => x(i))
+      .y(d => y(d))
+      .curve(d3.curveBasis);
+
+    svg.append("path")
+      .datum(signalHistory)
+      .attr("fill", "none")
+      .attr("stroke", "#3b82f6")
+      .attr("stroke-width", 2)
+      .attr("stroke-opacity", 0.6)
+      .attr("d", line);
+      
+    // Add a pulsing head dot
+    svg.append("circle")
+      .attr("cx", x(signalHistory.length - 1))
+      .attr("cy", y(signalHistory[signalHistory.length - 1]))
+      .attr("r", 3)
+      .attr("fill", "#3b82f6")
+      .attr("class", "animate-pulse");
+      
+  }, [signalHistory]);
 
   // Simulated data for demo
   useEffect(() => {
@@ -140,7 +193,7 @@ export default function App() {
         config: {
           responseMimeType: "application/json",
         },
-        contents: `Analyze this SMS message and provide a JSON summary.
+        contents: `Analyze this SMS message and provide a sophisticated JSON summary.
         Message: "${msg.content}"
         
         Desired JSON structure:
@@ -148,7 +201,9 @@ export default function App() {
           "isOTP": boolean,
           "otpCode": string (if isOTP is true),
           "senderType": "bank" | "personal" | "service" | "spam" | "unknown",
-          "summary": string (short overview)
+          "summary": string (very concise one-sentence description),
+          "confidence": number (0-1),
+          "suggestedActions": string[] (e.g., ["Verify Account", "Report Spam", "Save Event", "View Location", "Copy Code"])
         }`
       });
       
@@ -206,7 +261,16 @@ export default function App() {
           </nav>
         </div>
 
-        <div className="mt-auto p-6">
+        <div className="mt-auto p-6 space-y-4">
+          {/* Signal Integrity Overlay */}
+          <div className="bg-slate-800/40 rounded-2xl p-4 border border-slate-700/50">
+             <div className="flex items-center justify-between mb-2">
+                <span className="text-[9px] font-bold text-slate-500 uppercase tracking-widest">Signal Integrity</span>
+                <span className="text-[9px] font-mono text-blue-400">{Math.round(signalHistory[signalHistory.length-1])}%</span>
+             </div>
+             <svg ref={sparklineRef} className="w-full h-10 overflow-visible" />
+          </div>
+
           <div className="bg-slate-800/40 rounded-2xl p-5 border border-slate-700/50 backdrop-blur-sm">
             <div className="text-[10px] uppercase text-slate-500 font-bold mb-4 tracking-widest">Hardware Status</div>
             <div className="space-y-3.5 text-sm">
@@ -297,63 +361,67 @@ export default function App() {
 
         <div className="flex-1 flex overflow-hidden">
           {/* Message List */}
-          <div className="w-96 bg-white border-r border-slate-200 overflow-y-auto overflow-x-hidden">
-            {messages.length === 0 ? (
-               <div className="h-full flex flex-col items-center justify-center p-12 text-center opacity-30 gap-4">
-                  <MessageSquare className="w-10 h-10" />
-                  <p className="text-sm font-semibold">Gateway is idle</p>
-               </div>
-            ) : (
-              <div className="flex flex-col">
-                {messages.map((msg) => (
-                  <button 
-                    key={msg.id}
-                    onClick={() => setSelectedMessageId(msg.id)}
-                    className={cn(
-                      "group p-5 text-left transition-all border-b border-slate-50 relative",
-                      selectedMessageId === msg.id 
-                        ? "bg-blue-50/50" 
-                        : "bg-white hover:bg-slate-50",
-                    )}
-                  >
-                    {selectedMessageId === msg.id && (
-                      <div className="absolute left-0 top-0 bottom-0 w-1 bg-blue-600" />
-                    )}
-                    
-                    <div className="flex justify-between items-start mb-1.5">
-                      <span className={cn(
-                        "font-bold text-sm tracking-tight",
-                        !msg.isRead ? "text-slate-900" : "text-slate-600"
-                      )}>{msg.sender}</span>
-                      <span className="text-[10px] font-bold text-slate-400 uppercase tracking-tighter">
-                        {format(msg.timestamp, 'HH:mm')}
-                      </span>
-                    </div>
-                    
-                    <p className={cn(
-                      "text-sm line-clamp-1",
-                      !msg.isRead ? "text-slate-800 font-semibold" : "text-slate-500"
-                    )}>
-                      {msg.content}
-                    </p>
+          <LayoutGroup>
+            <div className="w-96 bg-white border-r border-slate-200 overflow-y-auto overflow-x-hidden">
+              {messages.length === 0 ? (
+                // ... same
+                 <div className="h-full flex flex-col items-center justify-center p-12 text-center opacity-30 gap-4">
+                    <MessageSquare className="w-10 h-10" />
+                    <p className="text-sm font-semibold">Gateway is idle</p>
+                 </div>
+              ) : (
+                <div className="flex flex-col">
+                  {messages.map((msg) => (
+                    <motion.button 
+                      layout
+                      key={msg.id}
+                      onClick={() => setSelectedMessageId(msg.id)}
+                      className={cn(
+                        "group p-5 text-left transition-all border-b border-slate-50 relative",
+                        selectedMessageId === msg.id 
+                          ? "bg-blue-50/50" 
+                          : "bg-white hover:bg-slate-50",
+                      )}
+                    >
+                      {selectedMessageId === msg.id && (
+                        <motion.div layoutId="activeMsgLine" className="absolute left-0 top-0 bottom-0 w-1 bg-blue-600" />
+                      )}
+                      
+                      <div className="flex justify-between items-start mb-1.5">
+                        <span className={cn(
+                          "font-bold text-sm tracking-tight",
+                          !msg.isRead ? "text-slate-900" : "text-slate-600"
+                        )}>{msg.sender}</span>
+                        <span className="text-[10px] font-bold text-slate-400 uppercase tracking-tighter">
+                          {format(msg.timestamp, 'HH:mm')}
+                        </span>
+                      </div>
+                      
+                      <p className={cn(
+                        "text-sm line-clamp-1",
+                        !msg.isRead ? "text-slate-800 font-semibold" : "text-slate-500"
+                      )}>
+                        {msg.content}
+                      </p>
 
-                    <div className="mt-3 flex gap-2">
-                       {smartInfo[msg.id]?.isOTP && (
-                         <span className="px-1.5 py-0.5 bg-amber-100 text-amber-700 text-[9px] font-bold rounded uppercase tracking-wider border border-amber-200">
-                           OTP Detected
-                         </span>
-                       )}
-                       {smartInfo[msg.id]?.senderType && smartInfo[msg.id]?.senderType !== 'unknown' && (
-                         <span className="px-1.5 py-0.5 bg-slate-100 text-slate-600 text-[9px] font-bold rounded uppercase tracking-wider border border-slate-200">
-                           {smartInfo[msg.id].senderType}
-                         </span>
-                       )}
-                    </div>
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
+                      <div className="mt-3 flex gap-2">
+                         {smartInfo[msg.id]?.isOTP && (
+                           <span className="px-1.5 py-0.5 bg-amber-100 text-amber-700 text-[9px] font-bold rounded uppercase tracking-wider border border-amber-200">
+                             OTP Detected
+                           </span>
+                         )}
+                         {smartInfo[msg.id]?.senderType && smartInfo[msg.id]?.senderType !== 'unknown' && (
+                           <span className="px-1.5 py-0.5 bg-slate-100 text-slate-600 text-[9px] font-bold rounded uppercase tracking-wider border border-slate-200">
+                             {smartInfo[msg.id].senderType}
+                           </span>
+                         )}
+                      </div>
+                    </motion.button>
+                  ))}
+                </div>
+              )}
+            </div>
+          </LayoutGroup>
 
           {/* Detail View */}
           <div className="flex-1 bg-white relative overflow-y-auto">
@@ -434,9 +502,25 @@ export default function App() {
                                         <p className="text-lg font-bold text-slate-800 uppercase">{smartInfo[selectedMessage.id].senderType} SENDER</p>
                                      </div>
                                   </div>
-                                  <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100">
+                                  <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100 flex-1">
                                      <p className="text-sm italic text-slate-600 line-clamp-3 leading-relaxed">"{smartInfo[selectedMessage.id].summary}"</p>
                                   </div>
+                                  
+                                  {/* Suggested Actions Row */}
+                                  {smartInfo[selectedMessage.id].suggestedActions?.length > 0 && (
+                                     <div className="flex flex-wrap gap-2 pt-2 border-t border-slate-100 mt-auto">
+                                        <h5 className="w-full text-[9px] font-bold text-slate-300 uppercase tracking-widest mb-1">Recommended Response Channel</h5>
+                                        {smartInfo[selectedMessage.id].suggestedActions.map((action, i) => (
+                                          <button 
+                                            key={i}
+                                            className="px-3 py-1.5 bg-white border border-slate-200 rounded-lg text-[10px] font-bold uppercase tracking-tight hover:bg-slate-50 hover:border-slate-400 transition-all flex items-center gap-1.5"
+                                          >
+                                            {action}
+                                            <ArrowRight className="w-3 h-3 text-blue-500" />
+                                          </button>
+                                        ))}
+                                     </div>
+                                  )}
                                </div>
                             ) : (
                                <button 
